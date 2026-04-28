@@ -3564,7 +3564,8 @@ async def order_signature_handler(message: Message, state: FSMContext):
                 f"Buyurtma holati haqida sizga xabar yuboriladi"
             )
 
-        await message.answer(user_text)
+        kb = get_main_menu_keyboard(message.from_user.id, lang)
+        await message.answer(user_text, reply_markup=kb)
 
         # Отправляем в админ-чат (группу) - отдельные PDF для каждой категории
         profile = get_user_profile(message.from_user.id)
@@ -3660,10 +3661,11 @@ async def order_signature_handler(message: Message, state: FSMContext):
     except Exception as e:
         logger.exception(f"Error in order signature handler")
         lang = get_user_lang(message.from_user.id)
+        kb = get_main_menu_keyboard(message.from_user.id, lang)
         if lang == "ru":
-            await message.answer("❌ Произошла ошибка при обработке заказа. Попробуйте позже.")
+            await message.answer("❌ Произошла ошибка при обработке заказа. Попробуйте позже.", reply_markup=kb)
         else:
-            await message.answer("❌ Buyurtmani qayta ishlashda xatolik yuz berdi. Keyinroq urinib ko'ring.")
+            await message.answer("❌ Buyurtmani qayta ishlashda xatolik yuz berdi. Keyinroq urinib ko'ring.", reply_markup=kb)
         await state.clear()
 
 
