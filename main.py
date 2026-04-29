@@ -142,17 +142,7 @@ user_start_times: Dict[int, datetime] = {}
 
 
 def is_webapp_button_active(user_id: int) -> bool:
-    """Проверяет, активна ли кнопка WebApp для пользователя"""
-    if user_id not in user_start_times:
-        logger.warning(f"[TIMER] User {user_id} not in user_start_times - button INACTIVE")
-        return False
-
-    elapsed = (datetime.now() - user_start_times[user_id]).total_seconds()
-    is_active = elapsed <= WEBAPP_BUTTON_TIMEOUT
-
-    logger.info(f"[TIMER] User {user_id}: elapsed={elapsed:.1f}s, timeout={WEBAPP_BUTTON_TIMEOUT}s, active={is_active}")
-
-    return is_active
+    return True
 
 
 def update_user_start_time(user_id: int):
