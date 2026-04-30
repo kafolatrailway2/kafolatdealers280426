@@ -1626,7 +1626,10 @@ async def download_image_async(url: str, timeout: int = 10) -> Optional[Image.Im
             try:
                 response = urlopen(url, timeout=timeout)
                 image_data = response.read()
-                return Image.open(io.BytesIO(image_data))
+                img = Image.open(io.BytesIO(image_data))
+                img.thumbnail((150, 150), Image.LANCZOS)
+                img = img.convert("RGB")
+                return img
             except Exception as e:
                 logger.warning(f"Failed to download image from {url}: {e}")
                 return None
@@ -1650,36 +1653,37 @@ def download_image(url: str, timeout: int = 10) -> Optional[Image.Image]:
     try:
         response = urlopen(url, timeout=timeout)
         image_data = response.read()
-        return Image.open(io.BytesIO(image_data))
+        img = Image.open(io.BytesIO(image_data))
+        img.thumbnail((150, 150), Image.LANCZOS)
+        img = img.convert("RGB")
+        return img
     except (URLError, HTTPError, Exception) as e:
         logger.warning(f"Failed to download image from {url}: {e}")
         return None
 
 
 async def preload_order_images(order_items: list) -> Dict[str, Image.Image]:
-    """
-    Параллельная предзагрузка всех изображений для заказа
-    """
     image_urls = []
-    
     for item in order_items:
         image_url = item.get("image", "")
         if image_url and image_url not in image_urls:
             image_urls.append(image_url)
-    
+
     if not image_urls:
         return {}
-    
-    logger.info(f"⚡ Preloading {len(image_urls)} unique images in parallel...")
-    
-    tasks = [download_image_async(url, timeout=5) for url in image_urls]
-    images = await asyncio.gather(*tasks, return_exceptions=True)
-    
+
+    logger.info(f"⚡ Preloading {len(image_urls)} unique images in batches...")
     result = {}
-    for url, image in zip(image_urls, images):
-        if image and not isinstance(image, Exception):
-            result[url] = image
-    
+    batch_size = 10
+
+    for i in range(0, len(image_urls), batch_size):
+        batch = image_urls[i:i+batch_size]
+        tasks = [download_image_async(url, timeout=5) for url in batch]
+        images = await asyncio.gather(*tasks, return_exceptions=True)
+        for url, image in zip(batch, images):
+            if image and not isinstance(image, Exception):
+                result[url] = image
+
     logger.info(f"✅ Preloaded {len(result)} images successfully")
     return result
 
@@ -2085,7 +2089,10 @@ except Exception as e:
 
 # ==================== ИНИЦИАЛИЗАЦИЯ БОТА ====================
 
-bot = Bot(token=API_TOKEN)
+from aiogram.client.session.aiohttp import AiohttpSession
+session = AiohttpSession(timeout=180)
+bot = Bot(token=API_TOKEN, session=session)
+
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
@@ -2655,7 +2662,7 @@ async def handle_webapp_data(message: Message, state: FSMContext):
 
     try:
         # ✅ Предзагружаем все изображения параллельно
-        preloaded_images = await preload_order_images(validated_data["items"])
+        preloaded_images = {}  
         
         pdf_preview = await asyncio.to_thread(
             generate_order_pdf,
