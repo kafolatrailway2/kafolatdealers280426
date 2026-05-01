@@ -480,6 +480,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 ADMIN_NAME = os.getenv("ADMIN_NAME", "Administrator")
 WEBAPP_URL = os.getenv("WEBAPP_URL")
+URL_ANALYSIS = os.getenv("URL_ANALYSIS")
 
 # Файлы
 USERS_FILE = "users.txt"
@@ -3906,7 +3907,33 @@ async def main():
     finally:
         await bot.session.close()
 
+@router.message(Command("analysis"))
+async def analysis_command(message: Message):
+    user_id = message.from_user.id
 
+    if user_id != SUPER_ADMIN_ID:
+        return
+
+    if not URL_ANALYSIS:
+        await message.answer("❌ URL_ANALYSIS не указан в .env")
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📊 Открыть Analysis",
+                    url=URL_ANALYSIS
+                )
+            ]
+        ]
+    )
+
+    await message.answer(
+        "📈 Панель анализа:",
+        reply_markup=kb
+    )
+    
 if __name__ == "__main__":
     try:
         asyncio.run(main())
