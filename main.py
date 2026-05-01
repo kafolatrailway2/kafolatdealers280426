@@ -2594,38 +2594,25 @@ async def handle_webapp_data(message: Message, state: FSMContext):
         else:
             await message.answer(f"❌ Tekshirish xatosi: {e}")
         return
-    
-    loading_msg = None
-    
+
+    # ===== 5. ПОЛУЧАЕМ ПОЛНУЮ ИНФОРМАЦИЮ ИЗ GOOGLE SHEETS =====
     try:
         # Показываем индикатор загрузки
         if lang == "ru":
             loading_msg = await message.answer("⏳ Загружаем информацию о товарах...")
         else:
             loading_msg = await message.answer("⏳ Mahsulotlar ma'lumotini yuklamoqdamiz...")
-    
+        
         # Загружаем товары из Google Sheets
         products = await fetch_products_from_sheets()
-    
+        
         if not products:
+            await loading_msg.delete()
             if lang == "ru":
                 await message.answer("❌ Не удалось загрузить каталог товаров. Попробуйте позже.")
             else:
                 await message.answer("❌ Mahsulotlar katalogini yuklashda xatolik. Keyinroq urinib ko'ring.")
             return
-    
-        # ===== ВАШ ОСТАЛЬНОЙ КОД =====
-    
-        await message.answer_document(
-            BufferedInputFile(pdf_bytes, filename=f"order_{order_id}.pdf")
-        )
-    
-    finally:
-        if loading_msg:
-            try:
-                await loading_msg.delete()
-            except:
-                pass
         
         # Дополняем данные заказа полной информацией
         enriched_items = []
