@@ -3923,7 +3923,7 @@ async def analysis_command(message: Message):
             [
                 InlineKeyboardButton(
                     text="📊 Открыть Analysis",
-                    url=URL_ANALYSIS
+                    web_app=WebAppInfo(url=URL_ANALYSIS)
                 )
             ]
         ]
