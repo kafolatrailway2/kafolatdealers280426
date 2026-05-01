@@ -1360,40 +1360,59 @@ def get_main_menu_keyboard(user_id: int, lang: str):
         )
 
     # ⏳ проверка таймера WebApp
-if is_webapp_button_active(user_id):
-    order_text = "🛒 Сделать заказ" if lang == "ru" else "🛒 Buyurtma berish"
+    if is_webapp_button_active(user_id):
 
-    buttons = [
-        [
-            KeyboardButton(
-                text=order_text,
-                text="📊 Анализ" if lang == "ru" else "📊 Tahlil",
-            )
-        ]
-    ]
+        order_text = "🛒 Сделать заказ" if lang == "ru" else "🛒 Buyurtma berish"
 
-    # Кнопка анализа только для супер-админа
-    if user_id == SUPER_ADMIN_ID:
-        buttons.append([
-            KeyboardButton(
-                text="📊 Анализ",
-                web_app=WebAppInfo(url=URL_ANALYSIS)
-            )
-        ])
-
-    return ReplyKeyboardMarkup(
-        keyboard=buttons + [
+        buttons = [
             [
                 KeyboardButton(
-                    text="📋 Мои заказы" if lang == "ru" else "📋 Mening buyurtmalarim"
-                ),
-                KeyboardButton(
-                    text="⚙️ Настройки" if lang == "ru" else "⚙️ Sozlamalar"
+                    text=order_text,
+                    web_app=WebAppInfo(url=WEBAPP_URL)
                 )
             ]
-        ],
-        resize_keyboard=True
-    )
+        ]
+
+        # ✅ Кнопка анализа только для супер-админа
+        if user_id == SUPER_ADMIN_ID:
+            buttons.append([
+                KeyboardButton(
+                    text="📊 Анализ" if lang == "ru" else "📊 Tahlil",
+                    web_app=WebAppInfo(url=URL_ANALYSIS)
+                )
+            ])
+
+        return ReplyKeyboardMarkup(
+            keyboard=buttons + [
+                [
+                    KeyboardButton(
+                        text="📋 Мои заказы" if lang == "ru" else "📋 Mening buyurtmalarim"
+                    ),
+                    KeyboardButton(
+                        text="⚙️ Настройки" if lang == "ru" else "⚙️ Sozlamalar"
+                    )
+                ]
+            ],
+            resize_keyboard=True
+        )
+
+    else:
+        menu_text = "🏠 Главный меню" if lang == "ru" else "🏠 Bosh menyu"
+
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=menu_text)],
+                [
+                    KeyboardButton(
+                        text="📋 Мои заказы" if lang == "ru" else "📋 Mening buyurtmalarim"
+                    ),
+                    KeyboardButton(
+                        text="⚙️ Настройки" if lang == "ru" else "⚙️ Sozlamalar"
+                    )
+                ]
+            ],
+            resize_keyboard=True
+        )
 
 
 def get_user_profile(user_id: int) -> Dict[str, str]:
