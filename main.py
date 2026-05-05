@@ -847,7 +847,20 @@ def init_db():
                 INDEX idx_user_id (user_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
-
+        # Таблица дилеров
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dealers (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                telegram_id BIGINT UNIQUE,
+                phone VARCHAR(50),
+                name VARCHAR(255),
+                status ENUM('active', 'inactive') DEFAULT 'active',
+                added_at DATETIME NOT NULL,
+                INDEX idx_telegram_id (telegram_id),
+                INDEX idx_phone (phone),
+                INDEX idx_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
         conn.commit()
         logger.info("✅ Database tables created/verified")
 
@@ -1311,37 +1324,19 @@ def set_user_lang(user_id: int, lang: str):
 
 # ==================== ПРОФИЛЬ ====================
 async def check_dealer_status(user_id: int, phone: str, force_check: bool = False) -> dict:
-    if not GOOGLE_SCRIPT_URL:
-        return {"is_active": True}
-
+    """Проверка статуса дилера через базу данных (не Google Sheets)"""
     if not force_check and user_id in dealer_cache:
         cached = dealer_cache[user_id]
-        if (datetime.now() - cached["last_check"]).total_seconds() < DEALER_CHECK_INTERVAL:
+        if (datetime.now() - cached.get("last_check", datetime.min)).total_seconds() < DEALER_CHECK_INTERVAL:
             return cached
 
-    clean_phone = re.sub(r'\D', '', phone)
-    url = f"{GOOGLE_SCRIPT_URL}?telegram_id={user_id}&phone={clean_phone}"
+    result = check_dealer_in_db(user_id, phone)
+    dealer_cache[user_id] = result
 
-    try:
-        response = await asyncio.to_thread(urlopen, url, timeout=10)
-        result = json.loads(response.read().decode())
+    if not result.get("is_active"):
+        dealer_block_time[user_id] = datetime.now()
 
-        info = {
-            "is_dealer": result.get("found", False),
-            "is_active": result.get("is_active", False),
-            "status": result.get("status", "unknown"),
-            "last_check": datetime.now()
-        }
-
-        dealer_cache[user_id] = info
-        if not info["is_active"]:
-            dealer_block_time[user_id] = datetime.now()
-
-        return info
-
-    except Exception:
-        return dealer_cache.get(user_id, {"is_active": True})
-
+    return result
 
 def is_dealer_active(user_id: int) -> bool:
     # если ещё не проверяли дилера — считаем активным
@@ -1499,7 +1494,7 @@ def get_user_info(user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_users_stats() -> Dict[str, Any]:
+def get_us  ers_stats() -> Dict[str, Any]:
     """Получение статистики пользователей"""
     try:
         with get_db_connection() as conn:
@@ -1534,6 +1529,106 @@ def get_users_stats() -> Dict[str, Any]:
         logger.exception("Error getting users stats")
         return {'total': 0, 'active_30d': 0, 'new_7d': 0}
 
+# ==================== ДИЛЕРЫ (DATABASE) ====================
+
+def check_dealer_in_db(user_id: int, phone: str) -> dict:
+    """Проверка дилера по telegram_id или номеру телефона в БД"""
+    try:
+        clean_phone = re.sub(r'\D', '', phone) if phone else ''
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Ищем по telegram_id или телефону
+            cursor.execute("""
+                SELECT telegram_id, phone, name, status
+                FROM dealers
+                WHERE telegram_id = %s OR phone = %s OR phone = %s
+                LIMIT 1
+            """, (user_id, phone, clean_phone))
+            row = cursor.fetchone()
+            if row:
+                is_active = row['status'] == 'active'
+                return {
+                    "is_dealer": True,
+                    "is_active": is_active,
+                    "status": row['status'],
+                    "name": row['name'],
+                    "last_check": datetime.now()
+                }
+            return {
+                "is_dealer": False,
+                "is_active": False,
+                "status": "not_found",
+                "last_check": datetime.now()
+            }
+    except Exception as e:
+        logger.exception(f"Error checking dealer in DB for user {user_id}")
+        return {"is_dealer": False, "is_active": False, "status": "error"}
+
+
+def add_dealer_to_db(telegram_id: int, phone: str, name: str, status: str = 'active') -> bool:
+    """Добавить или обновить дилера в БД"""
+    try:
+        clean_phone = re.sub(r'\D', '', phone) if phone else phone
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO dealers (telegram_id, phone, name, status, added_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    phone = VALUES(phone),
+                    name = VALUES(name),
+                    status = VALUES(status)
+            """, (telegram_id or None, clean_phone, name, status, datetime.now()))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.exception(f"Error adding dealer to DB")
+        return False
+
+
+def remove_dealer_from_db(telegram_id: int) -> bool:
+    """Удалить дилера из БД по telegram_id"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM dealers WHERE telegram_id = %s", (telegram_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception as e:
+        logger.exception(f"Error removing dealer from DB")
+        return False
+
+
+def set_dealer_status_in_db(telegram_id: int, status: str) -> bool:
+    """Изменить статус дилера (active/inactive)"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE dealers SET status = %s WHERE telegram_id = %s",
+                (status, telegram_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception as e:
+        logger.exception(f"Error updating dealer status in DB")
+        return False
+
+
+def get_all_dealers_from_db() -> list:
+    """Получить список всех дилеров из БД"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT telegram_id, phone, name, status, added_at
+                FROM dealers
+                ORDER BY added_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.exception("Error getting dealers from DB")
+        return []
 
 # ==================== FTP ====================
 
@@ -3861,6 +3956,156 @@ async def cmd_get_pdf(message: Message):
     await message.answer_document(document=pdf_file, caption=caption)
 
 
+# ==================== УПРАВЛЕНИЕ ДИЛЕРАМИ ====================
+
+@router.message(Command("add_dealer"))
+async def cmd_add_dealer(message: Message):
+    """
+    Добавить дилера в БД.
+    Использование: /add_dealer <telegram_id> <телефон> <имя>
+    Пример: /add_dealer 8301464087 998901234567 Asad beeline
+    """
+    if message.from_user.id != SUPER_ADMIN_ID:
+        return
+
+    parts = message.text.split(maxsplit=3)
+    if len(parts) < 4:
+        await message.answer(
+            "❌ Использование:\n"
+            "<code>/add_dealer &lt;telegram_id&gt; &lt;телефон&gt; &lt;имя&gt;</code>\n\n"
+            "Пример:\n"
+            "<code>/add_dealer 8301464087 998901234567 Asad beeline</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        tg_id = int(parts[1])
+        phone = parts[2]
+        name = parts[3]
+    except ValueError:
+        await message.answer("❌ telegram_id должен быть числом.")
+        return
+
+    success = add_dealer_to_db(tg_id, phone, name, status='active')
+    # Сбрасываем кеш для этого пользователя
+    dealer_cache.pop(tg_id, None)
+
+    if success:
+        await message.answer(
+            f"✅ Дилер добавлен/обновлён:\n"
+            f"🆔 TG ID: <code>{tg_id}</code>\n"
+            f"📱 Телефон: {phone}\n"
+            f"👤 Имя: {name}\n"
+            f"🟢 Статус: active",
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer("❌ Ошибка при добавлении дилера.")
+
+
+@router.message(Command("remove_dealer"))
+async def cmd_remove_dealer(message: Message):
+    """
+    Удалить дилера из БД.
+    Использование: /remove_dealer <telegram_id>
+    """
+    if message.from_user.id != SUPER_ADMIN_ID:
+        return
+
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer(
+            "❌ Использование: <code>/remove_dealer &lt;telegram_id&gt;</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        tg_id = int(parts[1])
+    except ValueError:
+        await message.answer("❌ telegram_id должен быть числом.")
+        return
+
+    removed = remove_dealer_from_db(tg_id)
+    dealer_cache.pop(tg_id, None)
+
+    if removed:
+        await message.answer(f"✅ Дилер <code>{tg_id}</code> удалён.", parse_mode="HTML")
+    else:
+        await message.answer(f"⚠️ Дилер с ID <code>{tg_id}</code> не найден.", parse_mode="HTML")
+
+
+@router.message(Command("dealer_status"))
+async def cmd_dealer_status(message: Message):
+    """
+    Изменить статус дилера.
+    Использование: /dealer_status <telegram_id> <active|inactive>
+    """
+    if message.from_user.id != SUPER_ADMIN_ID:
+        return
+
+    parts = message.text.split()
+    if len(parts) < 3:
+        await message.answer(
+            "❌ Использование: <code>/dealer_status &lt;telegram_id&gt; &lt;active|inactive&gt;</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        tg_id = int(parts[1])
+    except ValueError:
+        await message.answer("❌ telegram_id должен быть числом.")
+        return
+
+    status = parts[2].lower()
+    if status not in ('active', 'inactive'):
+        await message.answer("❌ Статус должен быть: active или inactive")
+        return
+
+    updated = set_dealer_status_in_db(tg_id, status)
+    dealer_cache.pop(tg_id, None)
+
+    emoji = "🟢" if status == "active" else "🔴"
+    if updated:
+        await message.answer(
+            f"{emoji} Статус дилера <code>{tg_id}</code> изменён на <b>{status}</b>",
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(f"⚠️ Дилер с ID <code>{tg_id}</code> не найден.")
+
+
+@router.message(Command("list_dealers"))
+async def cmd_list_dealers(message: Message):
+    """Показать список всех дилеров из БД"""
+    if message.from_user.id != SUPER_ADMIN_ID:
+        return
+
+    dealers = get_all_dealers_from_db()
+    if not dealers:
+        await message.answer("📋 Список дилеров пуст.")
+        return
+
+    lines = [f"📋 <b>Дилеры ({len(dealers)}):</b>\n"]
+    for d in dealers:
+        emoji = "🟢" if d['status'] == 'active' else "🔴"
+        tg_id = d['telegram_id'] or '—'
+        lines.append(
+            f"{emoji} <code>{tg_id}</code> | {d['phone']} | {d['name']}"
+        )
+
+    # Разбиваем на части если много дилеров
+    chunk = []
+    for line in lines:
+        chunk.append(line)
+        if len(chunk) >= 30:
+            await message.answer("\n".join(chunk), parse_mode="HTML")
+            chunk = []
+    if chunk:
+        await message.answer("\n".join(chunk), parse_mode="HTML")
+        
 # ==================== ЗАПУСК ====================
 
 async def on_startup(bot: Bot):
