@@ -1494,7 +1494,7 @@ def get_user_info(user_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_us  ers_stats() -> Dict[str, Any]:
+def get_users_stats() -> Dict[str, Any]:
     """Получение статистики пользователей"""
     try:
         with get_db_connection() as conn:
